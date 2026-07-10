@@ -1,7 +1,15 @@
 import DashboardCard from "../components/DashboardCard";
+import { getHealth } from "../lib/api";
+import BackendStatus from "../components/BackendStatus";
 
-export default function Home() {
+
+export default  function Home() {
+
   return (
+
+    <> <BackendStatus />
+
+    
     <main className="min-h-screen bg-gray-100 p-10">
       <div className="max-w-6xl mx-auto">
 
@@ -21,5 +29,7 @@ export default function Home() {
         </div>
       </div>
     </main>
+
+  </>
   );
 }
