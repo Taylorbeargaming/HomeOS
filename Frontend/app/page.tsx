@@ -11,12 +11,12 @@ export default function Home() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
 
-          <DashboardCard title="Kitchen Inventory" icon="📦" />
-          <DashboardCard title="Household Inventory" icon="🏠" />
-          <DashboardCard title="Shopping Lists" icon="🛒" />
-          <DashboardCard title="Calendar" icon="📅" />
-          <DashboardCard title="Finances" icon="💷" />
-          <DashboardCard title="Settings" icon="⚙️" />
+          <DashboardCard title="Kitchen Inventory" icon="📦" href="/kitchen" />
+          <DashboardCard title="Household Inventory" icon="🏠" href="/household" />
+          <DashboardCard title="Shopping Lists" icon="🛒" href="/shopping" />
+          <DashboardCard title="Calendar" icon="📅" href="/calendar" />
+          <DashboardCard title="Finances" icon="💷" href="/finances" />
+          <DashboardCard title="Settings" icon="⚙️" href="/settings" />
 
         </div>
       </div>
