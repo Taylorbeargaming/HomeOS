@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import health
+from app.routers import products
 
 app = FastAPI(title="HomeOS API")
 
@@ -17,3 +18,9 @@ app.include_router(health.router)
 @app.get("/")
 def root():
     return {"message": "HomeOS API is running"}
+
+app = FastAPI(
+    title="HomeOS API"
+)
+
+app.include_router(products.router)
