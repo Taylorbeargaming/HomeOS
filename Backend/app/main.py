@@ -14,13 +14,8 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(products.router)
 
 @app.get("/")
 def root():
     return {"message": "HomeOS API is running"}
-
-app = FastAPI(
-    title="HomeOS API"
-)
-
-app.include_router(products.router)

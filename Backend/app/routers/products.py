@@ -1,7 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Response, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 from psycopg.errors import UniqueViolation
 
 from app.database import get_connection
@@ -12,6 +12,10 @@ router = APIRouter(
     tags=["Products"],
 )
 
+
+# ==========================
+# Pydantic Models
+# ==========================
 
 class ProductCreate(BaseModel):
     product_name: str = Field(min_length=1, max_length=255)
@@ -25,6 +29,7 @@ class ProductUpdate(BaseModel):
     notes: Optional[str] = None
     is_active: bool = True
 
+
 class ProductResponse(BaseModel):
     product_id: int
     product_name: str
@@ -32,6 +37,10 @@ class ProductResponse(BaseModel):
     is_active: bool
     unit_id: int
 
+
+# ==========================
+# Helper Function
+# ==========================
 
 def product_to_dict(row) -> dict:
     return {
@@ -43,6 +52,10 @@ def product_to_dict(row) -> dict:
     }
 
 
+# ==========================
+# GET ALL PRODUCTS
+# ==========================
+
 @router.get("", response_model=list[ProductResponse])
 def get_products():
     with get_connection() as connection:
@@ -53,14 +66,21 @@ def get_products():
                     productid,
                     productname,
                     notes,
-                    isactive
+                    isactive,
+                    unitid
                 FROM products
                 ORDER BY productname;
                 """
             )
 
-            return [product_to_dict(row) for row in cursor.fetchall()]
+            products = cursor.fetchall()
 
+    return [product_to_dict(row) for row in products]
+
+
+# ==========================
+# GET SINGLE PRODUCT
+# ==========================
 
 @router.get("/{product_id}", response_model=ProductResponse)
 def get_product(product_id: int):
@@ -72,7 +92,7 @@ def get_product(product_id: int):
                     productid,
                     productname,
                     notes,
-                    isactive
+                    isactive,
                     unitid
                 FROM products
                 WHERE productid = %s;
@@ -90,6 +110,10 @@ def get_product(product_id: int):
 
     return product_to_dict(product)
 
+
+# ==========================
+# CREATE PRODUCT
+# ==========================
 
 @router.post(
     "",
@@ -113,10 +137,12 @@ def create_product(product: ProductCreate):
                     INSERT INTO products
                     (
                         productname,
-                        notes
+                        notes,
+                        unitid
                     )
                     VALUES
                     (
+                        %s,
                         %s,
                         %s
                     )
@@ -145,6 +171,10 @@ def create_product(product: ProductCreate):
         )
 
 
+# ==========================
+# UPDATE PRODUCT
+# ==========================
+
 @router.put("/{product_id}", response_model=ProductResponse)
 def update_product(product_id: int, product: ProductUpdate):
     product_name = product.product_name.strip()
@@ -164,6 +194,7 @@ def update_product(product_id: int, product: ProductUpdate):
                     SET
                         productname = %s,
                         notes = %s,
+                        unitid = %s,
                         isactive = %s,
                         updateddate = CURRENT_TIMESTAMP
                     WHERE productid = %s
@@ -171,11 +202,13 @@ def update_product(product_id: int, product: ProductUpdate):
                         productid,
                         productname,
                         notes,
-                        isactive;
+                        isactive,
+                        unitid;
                     """,
                     (
                         product_name,
                         product.notes,
+                        product.unit_id,
                         product.is_active,
                         product_id,
                     ),
@@ -197,6 +230,10 @@ def update_product(product_id: int, product: ProductUpdate):
             detail="A product with this name already exists",
         )
 
+
+# ==========================
+# DELETE PRODUCT
+# ==========================
 
 @router.delete(
     "/{product_id}",
