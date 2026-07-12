@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routers import health
 from app.routers import products
+from app.routers import units
 
 app = FastAPI(title="HomeOS API")
 
@@ -15,6 +16,7 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(products.router)
+app.include_router(units.router)
 
 @app.get("/")
 def root():
