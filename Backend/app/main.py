@@ -9,6 +9,7 @@ from app.routers import shopping_list
 from app.routers import shopping_list_item
 from app.routers import recipe  
 from app.routers import recipe_ingredient
+from app.routers import dashboard
 
 
 app = FastAPI(title="HomeOS API")
@@ -30,6 +31,7 @@ app.include_router(shopping_list.router)
 app.include_router(shopping_list_item.router)   
 app.include_router(recipe.router)
 app.include_router(recipe_ingredient.router)
+app.include_router(dashboard.router)
 
 @app.get("/")
 def root():
