@@ -2,7 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
-from psycopg.errors import UniqueViolation
+from psycopg.errors import RestrictViolation, UniqueViolation
 
 from app.database import get_connection
 
@@ -240,23 +240,31 @@ def update_product(product_id: int, product: ProductUpdate):
     status_code=status.HTTP_204_NO_CONTENT,
 )
 def delete_product(product_id: int):
-    with get_connection() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                DELETE FROM products
-                WHERE productid = %s
-                RETURNING productid;
-                """,
-                (product_id,),
+    try:
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    DELETE FROM products
+                    WHERE productid = %s
+                    RETURNING productid;
+                    """,
+                    (product_id,),
+                )
+
+                deleted_product = cursor.fetchone()
+
+        if deleted_product is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Product not found",
             )
 
-            deleted_product = cursor.fetchone()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    if deleted_product is None:
+    except RestrictViolation:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Product not found",
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This product cannot be deleted because it is currently used by inventory or other records.",
         )
-
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+   
