@@ -21,3 +21,7 @@ export function getDashboard() {
 export function getProducts() {
     return fetchAPI("/products");
 }
+
+export function getInventory() {
+    return fetchAPI("/inventory");
+}

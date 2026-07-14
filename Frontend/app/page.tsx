@@ -37,9 +37,9 @@ export default async function Home() {
             />
 
             <DashboardCard
-              title={`Products (${dashboard.products})`}
-              icon="🥛"
-              href="/products"
+              title="Household Tasks"
+              icon="✅"
+              href="/tasks"
             />
 
             <DashboardCard

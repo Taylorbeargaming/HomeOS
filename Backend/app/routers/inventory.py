@@ -26,19 +26,21 @@ class InventoryUpdate(BaseModel):
 
 class InventoryResponse(BaseModel):
     inventory_id: int
-    product_id: int
+    product_name: str
     quantity: float
+    unit_name: str
 
 
 # ==========================
 # Helper Function
 # ==========================
 
-def inventory_to_dict(row) -> dict:
+def inventory_to_dict(row):
     return {
         "inventory_id": row[0],
-        "product_id": row[1],
+        "product_name": row[1],
         "quantity": float(row[2]),
+        "unit_name": row[3],
     }
 
 
@@ -53,11 +55,16 @@ def get_inventory():
             cursor.execute(
                 """
                 SELECT
-                    inventoryid,
-                    productid,
-                    quantity
-                FROM inventory
-                ORDER BY inventoryid;
+                i.inventoryid,
+                p.productname,
+                i.quantity,
+                u.unitname
+                FROM inventory i
+                INNER JOIN products p
+                    ON i.productid = p.productid
+                INNER JOIN units u
+                    ON p.unitid = u.unitid
+                ORDER BY p.productname;
                 """
             )
 
