@@ -1,21 +1,22 @@
-type ButtonProps = {
-    children: React.ReactNode;
-    onClick?: () => void;
-    type?: "button" | "submit";
+import type { ButtonHTMLAttributes, ReactNode } from "react";
+
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  children: ReactNode;
 };
 
 export default function Button({
-    children,
-    onClick,
-    type = "button",
+  children,
+  className = "",
+  type = "button",
+  ...props
 }: ButtonProps) {
-    return (
-        <button
-            type={type}
-            onClick={onClick}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
-        >
-            {children}
-        </button>
-    );
+  return (
+    <button
+      type={type}
+      className={`rounded bg-black px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      {...props}
+    >
+      {children}
+    </button>
+  );
 }

@@ -2,11 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
-from psycopg.errors import (
-    ForeignKeyViolation,
-    RestrictViolation,
-    UniqueViolation,
-)
+from psycopg.errors import ForeignKeyViolation, UniqueViolation
 
 from app.database import get_connection
 
@@ -23,13 +19,13 @@ router = APIRouter(
 
 class ProductCreate(BaseModel):
     product_name: str = Field(min_length=1, max_length=255)
-    unit_id: int
+    unit_id: int = Field(gt=0)
     notes: Optional[str] = None
 
 
 class ProductUpdate(BaseModel):
     product_name: str = Field(min_length=1, max_length=255)
-    unit_id: int
+    unit_id: int = Field(gt=0)
     notes: Optional[str] = None
     is_active: bool = True
 
@@ -134,6 +130,7 @@ def get_product(product_id: int):
 )
 def create_product(product: ProductCreate):
     product_name = product.product_name.strip()
+    notes = product.notes.strip() if product.notes else None
 
     if not product_name:
         raise HTTPException(
@@ -144,7 +141,6 @@ def create_product(product: ProductCreate):
     try:
         with get_connection() as connection:
             with connection.cursor() as cursor:
-
                 cursor.execute(
                     """
                     INSERT INTO products
@@ -163,7 +159,7 @@ def create_product(product: ProductCreate):
                     """,
                     (
                         product_name,
-                        product.notes,
+                        notes,
                         product.unit_id,
                     ),
                 )
@@ -200,7 +196,7 @@ def create_product(product: ProductCreate):
     except ForeignKeyViolation:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid Unit ID.",
+            detail="Unit not found",
         )
 
 
@@ -211,6 +207,7 @@ def create_product(product: ProductCreate):
 @router.put("/{product_id}", response_model=ProductResponse)
 def update_product(product_id: int, product: ProductUpdate):
     product_name = product.product_name.strip()
+    notes = product.notes.strip() if product.notes else None
 
     if not product_name:
         raise HTTPException(
@@ -221,7 +218,6 @@ def update_product(product_id: int, product: ProductUpdate):
     try:
         with get_connection() as connection:
             with connection.cursor() as cursor:
-
                 cursor.execute(
                     """
                     UPDATE products
@@ -235,7 +231,7 @@ def update_product(product_id: int, product: ProductUpdate):
                     """,
                     (
                         product_name,
-                        product.notes,
+                        notes,
                         product.unit_id,
                         product.is_active,
                         product_id,
@@ -280,7 +276,7 @@ def update_product(product_id: int, product: ProductUpdate):
     except ForeignKeyViolation:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid Unit ID.",
+            detail="Unit not found",
         )
 
 
@@ -315,8 +311,11 @@ def delete_product(product_id: int):
 
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    except RestrictViolation:
+    except ForeignKeyViolation:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This product cannot be deleted because it is referenced by other records.",
+            detail=(
+                "This product cannot be deleted because it is referenced "
+                "by inventory, shopping lists, or recipes."
+            ),
         )

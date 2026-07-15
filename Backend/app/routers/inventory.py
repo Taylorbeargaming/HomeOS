@@ -1,6 +1,12 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
-from psycopg.errors import ForeignKeyViolation, UniqueViolation
+from psycopg.errors import (
+    ForeignKeyViolation,
+    RestrictViolation,
+    UniqueViolation,
+)
 
 from app.database import get_connection
 
@@ -16,18 +22,28 @@ router = APIRouter(
 # ==========================
 
 class InventoryCreate(BaseModel):
-    product_id: int
-    quantity: float = Field(gt=0)
+    product_id: int = Field(gt=0)
+    quantity: Decimal = Field(
+        gt=0,
+        max_digits=12,
+        decimal_places=3,
+    )
 
 
 class InventoryUpdate(BaseModel):
-    quantity: float = Field(ge=0)
+    quantity: Decimal = Field(
+        ge=0,
+        max_digits=12,
+        decimal_places=3,
+    )
 
 
 class InventoryResponse(BaseModel):
     inventory_id: int
+    product_id: int
     product_name: str
     quantity: float
+    unit_id: int
     unit_name: str
 
 
@@ -35,12 +51,14 @@ class InventoryResponse(BaseModel):
 # Helper Function
 # ==========================
 
-def inventory_to_dict(row):
+def inventory_to_dict(row) -> dict:
     return {
         "inventory_id": row[0],
-        "product_name": row[1],
-        "quantity": float(row[2]),
-        "unit_name": row[3],
+        "product_id": row[1],
+        "product_name": row[2],
+        "quantity": float(row[3]),
+        "unit_id": row[4],
+        "unit_name": row[5],
     }
 
 
@@ -56,8 +74,10 @@ def get_inventory():
                 """
                 SELECT
                     i.inventoryid,
+                    i.productid,
                     p.productname,
                     i.quantity,
+                    p.unitid,
                     u.unitname
                 FROM inventory i
                 INNER JOIN products p
@@ -85,8 +105,10 @@ def get_inventory_item(inventory_id: int):
                 """
                 SELECT
                     i.inventoryid,
+                    i.productid,
                     p.productname,
                     i.quantity,
+                    p.unitid,
                     u.unitname
                 FROM inventory i
                 INNER JOIN products p
@@ -122,7 +144,6 @@ def create_inventory_item(item: InventoryCreate):
     try:
         with get_connection() as connection:
             with connection.cursor() as cursor:
-
                 cursor.execute(
                     """
                     INSERT INTO inventory
@@ -147,10 +168,35 @@ def create_inventory_item(item: InventoryCreate):
 
                 cursor.execute(
                     """
+                    INSERT INTO inventorytransaction
+                    (
+                        inventoryid,
+                        quantitychange,
+                        transactiontype,
+                        notes
+                    )
+                    VALUES
+                    (
+                        %s,
+                        %s,
+                        'InitialStock',
+                        'Initial stock created with inventory item'
+                    );
+                    """,
+                    (
+                        inventory_id,
+                        item.quantity,
+                    ),
+                )
+
+                cursor.execute(
+                    """
                     SELECT
                         i.inventoryid,
+                        i.productid,
                         p.productname,
                         i.quantity,
+                        p.unitid,
                         u.unitname
                     FROM inventory i
                     INNER JOIN products p
@@ -175,12 +221,12 @@ def create_inventory_item(item: InventoryCreate):
     except ForeignKeyViolation:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Product does not exist",
+            detail="Product not found",
         )
 
 
 # ==========================
-# UPDATE INVENTORY
+# UPDATE INVENTORY ITEM
 # ==========================
 
 @router.put("/{inventory_id}", response_model=InventoryResponse)
@@ -190,12 +236,10 @@ def update_inventory_item(
 ):
     with get_connection() as connection:
         with connection.cursor() as cursor:
-
             cursor.execute(
                 """
                 UPDATE inventory
-                SET
-                    quantity = %s
+                SET quantity = %s
                 WHERE inventoryid = %s
                 RETURNING inventoryid;
                 """,
@@ -217,8 +261,10 @@ def update_inventory_item(
                 """
                 SELECT
                     i.inventoryid,
+                    i.productid,
                     p.productname,
                     i.quantity,
+                    p.unitid,
                     u.unitname
                 FROM inventory i
                 INNER JOIN products p
@@ -244,23 +290,33 @@ def update_inventory_item(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 def delete_inventory_item(inventory_id: int):
-    with get_connection() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                DELETE FROM inventory
-                WHERE inventoryid = %s
-                RETURNING inventoryid;
-                """,
-                (inventory_id,),
+    try:
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    DELETE FROM inventory
+                    WHERE inventoryid = %s
+                    RETURNING inventoryid;
+                    """,
+                    (inventory_id,),
+                )
+
+                deleted_item = cursor.fetchone()
+
+        if deleted_item is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Inventory item not found",
             )
 
-            deleted_item = cursor.fetchone()
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-    if deleted_item is None:
+    except (ForeignKeyViolation, RestrictViolation):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory item not found",
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This inventory item cannot be deleted because it has "
+                "inventory transaction history."
+            ),
         )
-
-    return Response(status_code=status.HTTP_204_NO_CONTENT)

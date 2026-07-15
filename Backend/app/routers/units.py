@@ -263,5 +263,8 @@ def delete_unit(unit_id: int):
     except ForeignKeyViolation:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This unit cannot be deleted because it is currently assigned to one or more products.",
+            detail=(
+                "This unit cannot be deleted because it is assigned "
+                "to a product or recipe ingredient."
+            ),
         )
