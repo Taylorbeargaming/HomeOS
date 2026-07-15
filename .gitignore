@@ -4,12 +4,12 @@ __pycache__/
 venv/
 .venv/
 
-# Environment files
+# Environment
 .env
 .env.*
 !.env.example
 
-# Node.js
+# Node
 node_modules/
 .next/
 
@@ -17,13 +17,9 @@ node_modules/
 .vscode/
 .idea/
 
-# OS files
+# OS
 .DS_Store
 Thumbs.db
 
 # Logs
 *.log
-
-# Python testing
-.pytest_cache/
-coverage/
