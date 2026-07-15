@@ -1,3 +1,6 @@
+from datetime import datetime
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
 
@@ -27,22 +30,24 @@ class ShoppingListResponse(BaseModel):
     shopping_list_id: int
     list_name: str
     completed: bool
+    completed_date: Optional[datetime]
 
 
 # ==========================
 # Helper Function
 # ==========================
 
-def shopping_list_to_dict(row):
+def shopping_list_to_dict(row) -> dict:
     return {
         "shopping_list_id": row[0],
         "list_name": row[1],
         "completed": row[2],
+        "completed_date": row[3],
     }
 
 
 # ==========================
-# GET ALL
+# GET ALL SHOPPING LISTS
 # ==========================
 
 @router.get("", response_model=list[ShoppingListResponse])
@@ -54,22 +59,29 @@ def get_shopping_lists():
                 SELECT
                     shoppinglistid,
                     listname,
-                    completed
+                    completed,
+                    completeddate
                 FROM shoppinglist
                 ORDER BY createddate DESC;
                 """
             )
 
-            rows = cursor.fetchall()
+            shopping_lists = cursor.fetchall()
 
-    return [shopping_list_to_dict(row) for row in rows]
+    return [
+        shopping_list_to_dict(row)
+        for row in shopping_lists
+    ]
 
 
 # ==========================
-# GET ONE
+# GET SINGLE SHOPPING LIST
 # ==========================
 
-@router.get("/{shopping_list_id}", response_model=ShoppingListResponse)
+@router.get(
+    "/{shopping_list_id}",
+    response_model=ShoppingListResponse,
+)
 def get_shopping_list(shopping_list_id: int):
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -78,26 +90,27 @@ def get_shopping_list(shopping_list_id: int):
                 SELECT
                     shoppinglistid,
                     listname,
-                    completed
+                    completed,
+                    completeddate
                 FROM shoppinglist
                 WHERE shoppinglistid = %s;
                 """,
                 (shopping_list_id,),
             )
 
-            row = cursor.fetchone()
+            shopping_list = cursor.fetchone()
 
-    if row is None:
+    if shopping_list is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Shopping list not found",
         )
 
-    return shopping_list_to_dict(row)
+    return shopping_list_to_dict(shopping_list)
 
 
 # ==========================
-# CREATE
+# CREATE SHOPPING LIST
 # ==========================
 
 @router.post(
@@ -105,12 +118,14 @@ def get_shopping_list(shopping_list_id: int):
     response_model=ShoppingListResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_shopping_list(shopping_list: ShoppingListCreate):
+def create_shopping_list(
+    shopping_list: ShoppingListCreate,
+):
     list_name = shopping_list.list_name.strip()
 
     if not list_name:
         raise HTTPException(
-            status_code=422,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="List name cannot be blank",
         )
 
@@ -129,21 +144,25 @@ def create_shopping_list(shopping_list: ShoppingListCreate):
                 RETURNING
                     shoppinglistid,
                     listname,
-                    completed;
+                    completed,
+                    completeddate;
                 """,
                 (list_name,),
             )
 
-            created = cursor.fetchone()
+            created_shopping_list = cursor.fetchone()
 
-    return shopping_list_to_dict(created)
+    return shopping_list_to_dict(created_shopping_list)
 
 
 # ==========================
-# UPDATE
+# UPDATE SHOPPING LIST
 # ==========================
 
-@router.put("/{shopping_list_id}", response_model=ShoppingListResponse)
+@router.put(
+    "/{shopping_list_id}",
+    response_model=ShoppingListResponse,
+)
 def update_shopping_list(
     shopping_list_id: int,
     shopping_list: ShoppingListUpdate,
@@ -152,7 +171,7 @@ def update_shopping_list(
 
     if not list_name:
         raise HTTPException(
-            status_code=422,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="List name cannot be blank",
         )
 
@@ -168,7 +187,8 @@ def update_shopping_list(
                 RETURNING
                     shoppinglistid,
                     listname,
-                    completed;
+                    completed,
+                    completeddate;
                 """,
                 (
                     list_name,
@@ -177,19 +197,19 @@ def update_shopping_list(
                 ),
             )
 
-            updated = cursor.fetchone()
+            updated_shopping_list = cursor.fetchone()
 
-    if updated is None:
+    if updated_shopping_list is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Shopping list not found",
         )
 
-    return shopping_list_to_dict(updated)
+    return shopping_list_to_dict(updated_shopping_list)
 
 
 # ==========================
-# DELETE
+# DELETE SHOPPING LIST
 # ==========================
 
 @router.delete(
@@ -208,11 +228,11 @@ def delete_shopping_list(shopping_list_id: int):
                 (shopping_list_id,),
             )
 
-            deleted = cursor.fetchone()
+            deleted_shopping_list = cursor.fetchone()
 
-    if deleted is None:
+    if deleted_shopping_list is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Shopping list not found",
         )
 

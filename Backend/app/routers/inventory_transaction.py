@@ -1,9 +1,11 @@
 from datetime import datetime
-from typing import Optional
+from decimal import Decimal
+from typing import Literal, Optional
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
-from psycopg.errors import ForeignKeyViolation
+from psycopg.errors import CheckViolation, ForeignKeyViolation
 
 from app.database import get_connection
 
@@ -14,21 +16,42 @@ router = APIRouter(
 )
 
 
+TransactionType = Literal[
+    "Purchase",
+    "Consumption",
+    "Waste",
+    "Adjustment",
+    "TransferIn",
+    "TransferOut",
+    "InitialStock",
+]
+
+
+POSITIVE_TRANSACTION_TYPES = {
+    "Purchase",
+    "TransferIn",
+    "InitialStock",
+}
+
+NEGATIVE_TRANSACTION_TYPES = {
+    "Consumption",
+    "Waste",
+    "TransferOut",
+}
+
+
 # ==========================
 # Pydantic Models
 # ==========================
 
 class InventoryTransactionCreate(BaseModel):
-    inventory_id: int
-    quantity_change: float
-    transaction_type: str
-    notes: Optional[str] = None
-    transaction_date: Optional[datetime] = None
-
-
-class InventoryTransactionUpdate(BaseModel):
-    quantity_change: float
-    transaction_type: str
+    inventory_id: int = Field(gt=0)
+    quantity_change: Decimal = Field(
+        ne=0,
+        max_digits=12,
+        decimal_places=3,
+    )
+    transaction_type: TransactionType
     notes: Optional[str] = None
     transaction_date: Optional[datetime] = None
 
@@ -43,10 +66,10 @@ class InventoryTransactionResponse(BaseModel):
 
 
 # ==========================
-# Helper Function
+# Helper Functions
 # ==========================
 
-def transaction_to_dict(row):
+def transaction_to_dict(row) -> dict:
     return {
         "transaction_id": str(row[0]),
         "inventory_id": row[1],
@@ -57,11 +80,43 @@ def transaction_to_dict(row):
     }
 
 
+def validate_quantity_change(
+    transaction_type: str,
+    quantity_change: Decimal,
+) -> None:
+    if (
+        transaction_type in POSITIVE_TRANSACTION_TYPES
+        and quantity_change <= 0
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"{transaction_type} transactions require "
+                "a positive quantity change"
+            ),
+        )
+
+    if (
+        transaction_type in NEGATIVE_TRANSACTION_TYPES
+        and quantity_change >= 0
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"{transaction_type} transactions require "
+                "a negative quantity change"
+            ),
+        )
+
+
 # ==========================
-# GET ALL
+# GET ALL TRANSACTIONS
 # ==========================
 
-@router.get("", response_model=list[InventoryTransactionResponse])
+@router.get(
+    "",
+    response_model=list[InventoryTransactionResponse],
+)
 def get_transactions():
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -75,21 +130,29 @@ def get_transactions():
                     notes,
                     transactiondate
                 FROM inventorytransaction
-                ORDER BY transactiondate DESC;
+                ORDER BY
+                    transactiondate DESC,
+                    createddate DESC;
                 """
             )
 
-            rows = cursor.fetchall()
+            transactions = cursor.fetchall()
 
-    return [transaction_to_dict(row) for row in rows]
+    return [
+        transaction_to_dict(row)
+        for row in transactions
+    ]
 
 
 # ==========================
-# GET ONE
+# GET SINGLE TRANSACTION
 # ==========================
 
-@router.get("/{transaction_id}", response_model=InventoryTransactionResponse)
-def get_transaction(transaction_id: str):
+@router.get(
+    "/{transaction_id}",
+    response_model=InventoryTransactionResponse,
+)
+def get_transaction(transaction_id: UUID):
     with get_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -107,19 +170,19 @@ def get_transaction(transaction_id: str):
                 (transaction_id,),
             )
 
-            row = cursor.fetchone()
+            transaction = cursor.fetchone()
 
-    if row is None:
+    if transaction is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Transaction not found",
         )
 
-    return transaction_to_dict(row)
+    return transaction_to_dict(transaction)
 
 
 # ==========================
-# CREATE
+# CREATE TRANSACTION
 # ==========================
 
 @router.post(
@@ -127,10 +190,72 @@ def get_transaction(transaction_id: str):
     response_model=InventoryTransactionResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_transaction(transaction: InventoryTransactionCreate):
+def create_transaction(
+    transaction: InventoryTransactionCreate,
+):
+    validate_quantity_change(
+        transaction.transaction_type,
+        transaction.quantity_change,
+    )
+
+    notes = (
+        transaction.notes.strip()
+        if transaction.notes
+        else None
+    )
+
     try:
         with get_connection() as connection:
             with connection.cursor() as cursor:
+
+                # Lock the inventory row until this database
+                # transaction has completed.
+                cursor.execute(
+                    """
+                    SELECT quantity
+                    FROM inventory
+                    WHERE inventoryid = %s
+                    FOR UPDATE;
+                    """,
+                    (transaction.inventory_id,),
+                )
+
+                inventory = cursor.fetchone()
+
+                if inventory is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Inventory item not found",
+                    )
+
+                current_quantity = inventory[0]
+
+                new_quantity = (
+                    current_quantity
+                    + transaction.quantity_change
+                )
+
+                if new_quantity < 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=(
+                            "This transaction would make the "
+                            "inventory quantity negative"
+                        ),
+                    )
+
+                cursor.execute(
+                    """
+                    UPDATE inventory
+                    SET quantity = %s
+                    WHERE inventoryid = %s;
+                    """,
+                    (
+                        new_quantity,
+                        transaction.inventory_id,
+                    ),
+                )
+
                 cursor.execute(
                     """
                     INSERT INTO inventorytransaction
@@ -161,96 +286,26 @@ def create_transaction(transaction: InventoryTransactionCreate):
                         transaction.inventory_id,
                         transaction.quantity_change,
                         transaction.transaction_type,
-                        transaction.notes,
+                        notes,
                         transaction.transaction_date,
                     ),
                 )
 
-                created = cursor.fetchone()
+                created_transaction = cursor.fetchone()
 
-        return transaction_to_dict(created)
+        return transaction_to_dict(created_transaction)
 
     except ForeignKeyViolation:
         raise HTTPException(
-            status_code=400,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Inventory item not found",
         )
 
-
-# ==========================
-# UPDATE
-# ==========================
-
-@router.put("/{transaction_id}", response_model=InventoryTransactionResponse)
-def update_transaction(
-    transaction_id: str,
-    transaction: InventoryTransactionUpdate,
-):
-    with get_connection() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                UPDATE inventorytransaction
-                SET
-                    quantitychange = %s,
-                    transactiontype = %s,
-                    notes = %s,
-                    transactiondate = COALESCE(%s, transactiondate)
-                WHERE transactionid = %s
-                RETURNING
-                    transactionid,
-                    inventoryid,
-                    quantitychange,
-                    transactiontype,
-                    notes,
-                    transactiondate;
-                """,
-                (
-                    transaction.quantity_change,
-                    transaction.transaction_type,
-                    transaction.notes,
-                    transaction.transaction_date,
-                    transaction_id,
-                ),
-            )
-
-            updated = cursor.fetchone()
-
-    if updated is None:
+    except CheckViolation:
         raise HTTPException(
-            status_code=404,
-            detail="Transaction not found",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "The transaction does not satisfy the "
+                "inventory transaction rules"
+            ),
         )
-
-    return transaction_to_dict(updated)
-
-
-# ==========================
-# DELETE
-# ==========================
-
-@router.delete(
-    "/{transaction_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
-def delete_transaction(transaction_id: str):
-    with get_connection() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                DELETE FROM inventorytransaction
-                WHERE transactionid = %s
-                RETURNING transactionid;
-                """,
-                (transaction_id,),
-            )
-
-            deleted = cursor.fetchone()
-
-    if deleted is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Transaction not found",
-        )
-
-    return Response(status_code=status.HTTP_204_NO_CONTENT)

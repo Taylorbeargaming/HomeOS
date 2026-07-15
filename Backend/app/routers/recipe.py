@@ -40,10 +40,10 @@ class RecipeResponse(BaseModel):
 
 
 # ==========================
-# Helper Function
+# Helper Functions
 # ==========================
 
-def recipe_to_dict(row):
+def recipe_to_dict(row) -> dict:
     return {
         "recipe_id": row[0],
         "recipe_name": row[1],
@@ -53,8 +53,17 @@ def recipe_to_dict(row):
     }
 
 
+def clean_optional_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+
+    cleaned_value = value.strip()
+
+    return cleaned_value or None
+
+
 # ==========================
-# GET ALL
+# GET ALL RECIPES
 # ==========================
 
 @router.get("", response_model=list[RecipeResponse])
@@ -80,10 +89,13 @@ def get_recipes():
 
 
 # ==========================
-# GET ONE
+# GET SINGLE RECIPE
 # ==========================
 
-@router.get("/{recipe_id}", response_model=RecipeResponse)
+@router.get(
+    "/{recipe_id}",
+    response_model=RecipeResponse,
+)
 def get_recipe(recipe_id: int):
     with get_connection() as connection:
         with connection.cursor() as cursor:
@@ -105,7 +117,7 @@ def get_recipe(recipe_id: int):
 
     if recipe is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Recipe not found",
         )
 
@@ -113,7 +125,7 @@ def get_recipe(recipe_id: int):
 
 
 # ==========================
-# CREATE
+# CREATE RECIPE
 # ==========================
 
 @router.post(
@@ -124,16 +136,18 @@ def get_recipe(recipe_id: int):
 def create_recipe(recipe: RecipeCreate):
     recipe_name = recipe.recipe_name.strip()
     category = recipe.category.strip()
+    instructions = clean_optional_text(recipe.instructions)
+    notes = clean_optional_text(recipe.notes)
 
     if not recipe_name:
         raise HTTPException(
-            status_code=422,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Recipe name cannot be blank",
         )
 
     if not category:
         raise HTTPException(
-            status_code=422,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Category cannot be blank",
         )
 
@@ -166,40 +180,48 @@ def create_recipe(recipe: RecipeCreate):
                     (
                         recipe_name,
                         category,
-                        recipe.instructions,
-                        recipe.notes,
+                        instructions,
+                        notes,
                     ),
                 )
 
-                created = cursor.fetchone()
+                created_recipe = cursor.fetchone()
 
-        return recipe_to_dict(created)
+        return recipe_to_dict(created_recipe)
 
     except UniqueViolation:
         raise HTTPException(
-            status_code=409,
+            status_code=status.HTTP_409_CONFLICT,
             detail="A recipe with this name already exists",
         )
 
 
 # ==========================
-# UPDATE
+# UPDATE RECIPE
 # ==========================
 
-@router.put("/{recipe_id}", response_model=RecipeResponse)
-def update_recipe(recipe_id: int, recipe: RecipeUpdate):
+@router.put(
+    "/{recipe_id}",
+    response_model=RecipeResponse,
+)
+def update_recipe(
+    recipe_id: int,
+    recipe: RecipeUpdate,
+):
     recipe_name = recipe.recipe_name.strip()
     category = recipe.category.strip()
+    instructions = clean_optional_text(recipe.instructions)
+    notes = clean_optional_text(recipe.notes)
 
     if not recipe_name:
         raise HTTPException(
-            status_code=422,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Recipe name cannot be blank",
         )
 
     if not category:
         raise HTTPException(
-            status_code=422,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Category cannot be blank",
         )
 
@@ -225,31 +247,31 @@ def update_recipe(recipe_id: int, recipe: RecipeUpdate):
                     (
                         recipe_name,
                         category,
-                        recipe.instructions,
-                        recipe.notes,
+                        instructions,
+                        notes,
                         recipe_id,
                     ),
                 )
 
-                updated = cursor.fetchone()
+                updated_recipe = cursor.fetchone()
 
-        if updated is None:
+        if updated_recipe is None:
             raise HTTPException(
-                status_code=404,
+                status_code=status.HTTP_404_NOT_FOUND,
                 detail="Recipe not found",
             )
 
-        return recipe_to_dict(updated)
+        return recipe_to_dict(updated_recipe)
 
     except UniqueViolation:
         raise HTTPException(
-            status_code=409,
+            status_code=status.HTTP_409_CONFLICT,
             detail="A recipe with this name already exists",
         )
 
 
 # ==========================
-# DELETE
+# DELETE RECIPE
 # ==========================
 
 @router.delete(
@@ -268,11 +290,11 @@ def delete_recipe(recipe_id: int):
                 (recipe_id,),
             )
 
-            deleted = cursor.fetchone()
+            deleted_recipe = cursor.fetchone()
 
-    if deleted is None:
+    if deleted_recipe is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Recipe not found",
         )
 

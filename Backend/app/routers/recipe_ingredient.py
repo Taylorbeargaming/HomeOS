@@ -1,3 +1,6 @@
+from decimal import Decimal
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from psycopg.errors import ForeignKeyViolation, UniqueViolation
@@ -16,25 +19,36 @@ router = APIRouter(
 # ==========================
 
 class RecipeIngredientCreate(BaseModel):
-    recipe_id: int
-    product_id: int
-    quantity: float = Field(gt=0)
-    unit_id: int
+    recipe_id: int = Field(gt=0)
+    product_id: int = Field(gt=0)
+    quantity: Decimal = Field(
+        gt=0,
+        max_digits=12,
+        decimal_places=3,
+    )
+    unit_id: int = Field(gt=0)
     optional: bool = False
 
 
 class RecipeIngredientUpdate(BaseModel):
-    quantity: float = Field(gt=0)
-    unit_id: int
+    quantity: Decimal = Field(
+        gt=0,
+        max_digits=12,
+        decimal_places=3,
+    )
+    unit_id: int = Field(gt=0)
     optional: bool = False
 
 
 class RecipeIngredientResponse(BaseModel):
     recipe_ingredient_id: int
     recipe_id: int
+    recipe_name: str
     product_id: int
+    product_name: str
     quantity: float
     unit_id: int
+    unit_name: str
     optional: bool
 
 
@@ -42,80 +56,175 @@ class RecipeIngredientResponse(BaseModel):
 # Helper Function
 # ==========================
 
-def recipe_ingredient_to_dict(row):
+def recipe_ingredient_to_dict(row) -> dict:
     return {
         "recipe_ingredient_id": row[0],
         "recipe_id": row[1],
-        "product_id": row[2],
-        "quantity": float(row[3]),
-        "unit_id": row[4],
-        "optional": row[5],
+        "recipe_name": row[2],
+        "product_id": row[3],
+        "product_name": row[4],
+        "quantity": float(row[5]),
+        "unit_id": row[6],
+        "unit_name": row[7],
+        "optional": row[8],
     }
 
 
 # ==========================
-# GET ALL
+# GET ALL RECIPE INGREDIENTS
 # ==========================
 
-@router.get("", response_model=list[RecipeIngredientResponse])
+@router.get(
+    "",
+    response_model=list[RecipeIngredientResponse],
+)
 def get_recipe_ingredients():
     with get_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
                 SELECT
-                    recipeingredientid,
-                    recipeid,
-                    productid,
-                    quantity,
-                    unitid,
-                    optional
-                FROM recipeingredient
-                ORDER BY recipeid;
+                    ri.recipeingredientid,
+                    ri.recipeid,
+                    r.recipename,
+                    ri.productid,
+                    p.productname,
+                    ri.quantity,
+                    ri.unitid,
+                    u.unitname,
+                    ri.optional
+                FROM recipeingredient ri
+                INNER JOIN recipe r
+                    ON ri.recipeid = r.recipeid
+                INNER JOIN products p
+                    ON ri.productid = p.productid
+                INNER JOIN units u
+                    ON ri.unitid = u.unitid
+                ORDER BY
+                    r.recipename,
+                    p.productname;
                 """
             )
 
-            rows = cursor.fetchall()
+            recipe_ingredients = cursor.fetchall()
 
-    return [recipe_ingredient_to_dict(row) for row in rows]
+    return [
+        recipe_ingredient_to_dict(row)
+        for row in recipe_ingredients
+    ]
 
 
 # ==========================
-# GET ONE
+# GET INGREDIENTS FOR ONE RECIPE
 # ==========================
 
-@router.get("/{recipe_ingredient_id}", response_model=RecipeIngredientResponse)
+@router.get(
+    "/recipe/{recipe_id}",
+    response_model=list[RecipeIngredientResponse],
+)
+def get_ingredients_for_recipe(recipe_id: int):
+    with get_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT recipeid
+                FROM recipe
+                WHERE recipeid = %s;
+                """,
+                (recipe_id,),
+            )
+
+            recipe = cursor.fetchone()
+
+            if recipe is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Recipe not found",
+                )
+
+            cursor.execute(
+                """
+                SELECT
+                    ri.recipeingredientid,
+                    ri.recipeid,
+                    r.recipename,
+                    ri.productid,
+                    p.productname,
+                    ri.quantity,
+                    ri.unitid,
+                    u.unitname,
+                    ri.optional
+                FROM recipeingredient ri
+                INNER JOIN recipe r
+                    ON ri.recipeid = r.recipeid
+                INNER JOIN products p
+                    ON ri.productid = p.productid
+                INNER JOIN units u
+                    ON ri.unitid = u.unitid
+                WHERE ri.recipeid = %s
+                ORDER BY
+                    ri.optional,
+                    p.productname;
+                """,
+                (recipe_id,),
+            )
+
+            recipe_ingredients = cursor.fetchall()
+
+    return [
+        recipe_ingredient_to_dict(row)
+        for row in recipe_ingredients
+    ]
+
+
+# ==========================
+# GET SINGLE RECIPE INGREDIENT
+# ==========================
+
+@router.get(
+    "/{recipe_ingredient_id}",
+    response_model=RecipeIngredientResponse,
+)
 def get_recipe_ingredient(recipe_ingredient_id: int):
     with get_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
                 SELECT
-                    recipeingredientid,
-                    recipeid,
-                    productid,
-                    quantity,
-                    unitid,
-                    optional
-                FROM recipeingredient
-                WHERE recipeingredientid = %s;
+                    ri.recipeingredientid,
+                    ri.recipeid,
+                    r.recipename,
+                    ri.productid,
+                    p.productname,
+                    ri.quantity,
+                    ri.unitid,
+                    u.unitname,
+                    ri.optional
+                FROM recipeingredient ri
+                INNER JOIN recipe r
+                    ON ri.recipeid = r.recipeid
+                INNER JOIN products p
+                    ON ri.productid = p.productid
+                INNER JOIN units u
+                    ON ri.unitid = u.unitid
+                WHERE ri.recipeingredientid = %s;
                 """,
                 (recipe_ingredient_id,),
             )
 
-            row = cursor.fetchone()
+            recipe_ingredient = cursor.fetchone()
 
-    if row is None:
+    if recipe_ingredient is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Recipe ingredient not found",
         )
 
-    return recipe_ingredient_to_dict(row)
+    return recipe_ingredient_to_dict(recipe_ingredient)
 
 
 # ==========================
-# CREATE
+# CREATE RECIPE INGREDIENT
 # ==========================
 
 @router.post(
@@ -123,7 +232,9 @@ def get_recipe_ingredient(recipe_ingredient_id: int):
     response_model=RecipeIngredientResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_recipe_ingredient(ingredient: RecipeIngredientCreate):
+def create_recipe_ingredient(
+    ingredient: RecipeIngredientCreate,
+):
     try:
         with get_connection() as connection:
             with connection.cursor() as cursor:
@@ -145,13 +256,7 @@ def create_recipe_ingredient(ingredient: RecipeIngredientCreate):
                         %s,
                         %s
                     )
-                    RETURNING
-                        recipeingredientid,
-                        recipeid,
-                        productid,
-                        quantity,
-                        unitid,
-                        optional;
+                    RETURNING recipeingredientid;
                     """,
                     (
                         ingredient.recipe_id,
@@ -162,71 +267,127 @@ def create_recipe_ingredient(ingredient: RecipeIngredientCreate):
                     ),
                 )
 
-                created = cursor.fetchone()
+                recipe_ingredient_id = cursor.fetchone()[0]
 
-        return recipe_ingredient_to_dict(created)
+                cursor.execute(
+                    """
+                    SELECT
+                        ri.recipeingredientid,
+                        ri.recipeid,
+                        r.recipename,
+                        ri.productid,
+                        p.productname,
+                        ri.quantity,
+                        ri.unitid,
+                        u.unitname,
+                        ri.optional
+                    FROM recipeingredient ri
+                    INNER JOIN recipe r
+                        ON ri.recipeid = r.recipeid
+                    INNER JOIN products p
+                        ON ri.productid = p.productid
+                    INNER JOIN units u
+                        ON ri.unitid = u.unitid
+                    WHERE ri.recipeingredientid = %s;
+                    """,
+                    (recipe_ingredient_id,),
+                )
+
+                created_ingredient = cursor.fetchone()
+
+        return recipe_ingredient_to_dict(created_ingredient)
 
     except UniqueViolation:
         raise HTTPException(
-            status_code=409,
+            status_code=status.HTTP_409_CONFLICT,
             detail="This ingredient already exists in the recipe",
         )
 
     except ForeignKeyViolation:
         raise HTTPException(
-            status_code=400,
-            detail="Recipe, product or unit not found",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Recipe, product, or unit not found",
         )
 
 
 # ==========================
-# UPDATE
+# UPDATE RECIPE INGREDIENT
 # ==========================
 
-@router.put("/{recipe_ingredient_id}", response_model=RecipeIngredientResponse)
+@router.put(
+    "/{recipe_ingredient_id}",
+    response_model=RecipeIngredientResponse,
+)
 def update_recipe_ingredient(
     recipe_ingredient_id: int,
     ingredient: RecipeIngredientUpdate,
 ):
-    with get_connection() as connection:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                UPDATE recipeingredient
-                SET
-                    quantity = %s,
-                    unitid = %s,
-                    optional = %s
-                WHERE recipeingredientid = %s
-                RETURNING
-                    recipeingredientid,
-                    recipeid,
-                    productid,
-                    quantity,
-                    unitid,
-                    optional;
-                """,
-                (
-                    ingredient.quantity,
-                    ingredient.unit_id,
-                    ingredient.optional,
-                    recipe_ingredient_id,
-                ),
-            )
+    try:
+        with get_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE recipeingredient
+                    SET
+                        quantity = %s,
+                        unitid = %s,
+                        optional = %s
+                    WHERE recipeingredientid = %s
+                    RETURNING recipeingredientid;
+                    """,
+                    (
+                        ingredient.quantity,
+                        ingredient.unit_id,
+                        ingredient.optional,
+                        recipe_ingredient_id,
+                    ),
+                )
 
-            updated = cursor.fetchone()
+                updated = cursor.fetchone()
 
-    if updated is None:
+                if updated is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Recipe ingredient not found",
+                    )
+
+                cursor.execute(
+                    """
+                    SELECT
+                        ri.recipeingredientid,
+                        ri.recipeid,
+                        r.recipename,
+                        ri.productid,
+                        p.productname,
+                        ri.quantity,
+                        ri.unitid,
+                        u.unitname,
+                        ri.optional
+                    FROM recipeingredient ri
+                    INNER JOIN recipe r
+                        ON ri.recipeid = r.recipeid
+                    INNER JOIN products p
+                        ON ri.productid = p.productid
+                    INNER JOIN units u
+                        ON ri.unitid = u.unitid
+                    WHERE ri.recipeingredientid = %s;
+                    """,
+                    (recipe_ingredient_id,),
+                )
+
+                updated_ingredient = cursor.fetchone()
+
+        return recipe_ingredient_to_dict(updated_ingredient)
+
+    except ForeignKeyViolation:
         raise HTTPException(
-            status_code=404,
-            detail="Recipe ingredient not found",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unit not found",
         )
-
-    return recipe_ingredient_to_dict(updated)
 
 
 # ==========================
-# DELETE
+# DELETE RECIPE INGREDIENT
 # ==========================
 
 @router.delete(
@@ -245,11 +406,11 @@ def delete_recipe_ingredient(recipe_ingredient_id: int):
                 (recipe_ingredient_id,),
             )
 
-            deleted = cursor.fetchone()
+            deleted_ingredient = cursor.fetchone()
 
-    if deleted is None:
+    if deleted_ingredient is None:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail="Recipe ingredient not found",
         )
 

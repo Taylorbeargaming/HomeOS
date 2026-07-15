@@ -55,10 +55,10 @@ def get_inventory():
             cursor.execute(
                 """
                 SELECT
-                i.inventoryid,
-                p.productname,
-                i.quantity,
-                u.unitname
+                    i.inventoryid,
+                    p.productname,
+                    i.quantity,
+                    u.unitname
                 FROM inventory i
                 INNER JOIN products p
                     ON i.productid = p.productid
@@ -84,11 +84,16 @@ def get_inventory_item(inventory_id: int):
             cursor.execute(
                 """
                 SELECT
-                    inventoryid,
-                    productid,
-                    quantity
-                FROM inventory
-                WHERE inventoryid = %s;
+                    i.inventoryid,
+                    p.productname,
+                    i.quantity,
+                    u.unitname
+                FROM inventory i
+                INNER JOIN products p
+                    ON i.productid = p.productid
+                INNER JOIN units u
+                    ON p.unitid = u.unitid
+                WHERE i.inventoryid = %s;
                 """,
                 (inventory_id,),
             )
@@ -117,6 +122,7 @@ def create_inventory_item(item: InventoryCreate):
     try:
         with get_connection() as connection:
             with connection.cursor() as cursor:
+
                 cursor.execute(
                     """
                     INSERT INTO inventory
@@ -129,15 +135,31 @@ def create_inventory_item(item: InventoryCreate):
                         %s,
                         %s
                     )
-                    RETURNING
-                        inventoryid,
-                        productid,
-                        quantity;
+                    RETURNING inventoryid;
                     """,
                     (
                         item.product_id,
                         item.quantity,
                     ),
+                )
+
+                inventory_id = cursor.fetchone()[0]
+
+                cursor.execute(
+                    """
+                    SELECT
+                        i.inventoryid,
+                        p.productname,
+                        i.quantity,
+                        u.unitname
+                    FROM inventory i
+                    INNER JOIN products p
+                        ON i.productid = p.productid
+                    INNER JOIN units u
+                        ON p.unitid = u.unitid
+                    WHERE i.inventoryid = %s;
+                    """,
+                    (inventory_id,),
                 )
 
                 created_item = cursor.fetchone()
@@ -168,16 +190,14 @@ def update_inventory_item(
 ):
     with get_connection() as connection:
         with connection.cursor() as cursor:
+
             cursor.execute(
                 """
                 UPDATE inventory
                 SET
                     quantity = %s
                 WHERE inventoryid = %s
-                RETURNING
-                    inventoryid,
-                    productid,
-                    quantity;
+                RETURNING inventoryid;
                 """,
                 (
                     item.quantity,
@@ -185,13 +205,32 @@ def update_inventory_item(
                 ),
             )
 
-            updated_item = cursor.fetchone()
+            updated = cursor.fetchone()
 
-    if updated_item is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory item not found",
-        )
+            if updated is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Inventory item not found",
+                )
+
+            cursor.execute(
+                """
+                SELECT
+                    i.inventoryid,
+                    p.productname,
+                    i.quantity,
+                    u.unitname
+                FROM inventory i
+                INNER JOIN products p
+                    ON i.productid = p.productid
+                INNER JOIN units u
+                    ON p.unitid = u.unitid
+                WHERE i.inventoryid = %s;
+                """,
+                (inventory_id,),
+            )
+
+            updated_item = cursor.fetchone()
 
     return inventory_to_dict(updated_item)
 

@@ -11,14 +11,18 @@ router = APIRouter(
 )
 
 
+# ==========================
+# Pydantic Models
+# ==========================
+
 class UnitCreate(BaseModel):
-    unit_name: str = Field(min_length=1)
-    abbreviation: str = Field(min_length=1)
+    unit_name: str = Field(min_length=1, max_length=255)
+    abbreviation: str = Field(min_length=1, max_length=20)
 
 
 class UnitUpdate(BaseModel):
-    unit_name: str = Field(min_length=1)
-    abbreviation: str = Field(min_length=1)
+    unit_name: str = Field(min_length=1, max_length=255)
+    abbreviation: str = Field(min_length=1, max_length=20)
     is_active: bool = True
 
 
@@ -29,6 +33,10 @@ class UnitResponse(BaseModel):
     is_active: bool
 
 
+# ==========================
+# Helper Function
+# ==========================
+
 def unit_to_dict(row) -> dict:
     return {
         "unit_id": row[0],
@@ -37,6 +45,10 @@ def unit_to_dict(row) -> dict:
         "is_active": row[3],
     }
 
+
+# ==========================
+# GET ALL UNITS
+# ==========================
 
 @router.get("", response_model=list[UnitResponse])
 def get_units():
@@ -58,6 +70,10 @@ def get_units():
 
     return [unit_to_dict(row) for row in units]
 
+
+# ==========================
+# GET SINGLE UNIT
+# ==========================
 
 @router.get("/{unit_id}", response_model=UnitResponse)
 def get_unit(unit_id: int):
@@ -86,6 +102,10 @@ def get_unit(unit_id: int):
 
     return unit_to_dict(unit)
 
+
+# ==========================
+# CREATE UNIT
+# ==========================
 
 @router.post(
     "",
@@ -146,6 +166,10 @@ def create_unit(unit: UnitCreate):
         )
 
 
+# ==========================
+# UPDATE UNIT
+# ==========================
+
 @router.put("/{unit_id}", response_model=UnitResponse)
 def update_unit(unit_id: int, unit: UnitUpdate):
     unit_name = unit.unit_name.strip()
@@ -205,6 +229,10 @@ def update_unit(unit_id: int, unit: UnitUpdate):
         )
 
 
+# ==========================
+# DELETE UNIT
+# ==========================
+
 @router.delete(
     "/{unit_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -235,6 +263,5 @@ def delete_unit(unit_id: int):
     except ForeignKeyViolation:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This unit cannot be deleted because it is used by a product",
+            detail="This unit cannot be deleted because it is currently assigned to one or more products.",
         )
-

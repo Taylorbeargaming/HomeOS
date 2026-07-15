@@ -2,7 +2,11 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Response, status
 from pydantic import BaseModel, Field
-from psycopg.errors import RestrictViolation, UniqueViolation
+from psycopg.errors import (
+    ForeignKeyViolation,
+    RestrictViolation,
+    UniqueViolation,
+)
 
 from app.database import get_connection
 
@@ -36,6 +40,7 @@ class ProductResponse(BaseModel):
     notes: Optional[str]
     is_active: bool
     unit_id: int
+    unit_name: str
 
 
 # ==========================
@@ -49,6 +54,7 @@ def product_to_dict(row) -> dict:
         "notes": row[2],
         "is_active": row[3],
         "unit_id": row[4],
+        "unit_name": row[5],
     }
 
 
@@ -63,13 +69,16 @@ def get_products():
             cursor.execute(
                 """
                 SELECT
-                    productid,
-                    productname,
-                    notes,
-                    isactive,
-                    unitid
-                FROM products
-                ORDER BY productname;
+                    p.productid,
+                    p.productname,
+                    p.notes,
+                    p.isactive,
+                    p.unitid,
+                    u.unitname
+                FROM products p
+                INNER JOIN units u
+                    ON p.unitid = u.unitid
+                ORDER BY p.productname;
                 """
             )
 
@@ -89,13 +98,16 @@ def get_product(product_id: int):
             cursor.execute(
                 """
                 SELECT
-                    productid,
-                    productname,
-                    notes,
-                    isactive,
-                    unitid
-                FROM products
-                WHERE productid = %s;
+                    p.productid,
+                    p.productname,
+                    p.notes,
+                    p.isactive,
+                    p.unitid,
+                    u.unitname
+                FROM products p
+                INNER JOIN units u
+                    ON p.unitid = u.unitid
+                WHERE p.productid = %s;
                 """,
                 (product_id,),
             )
@@ -132,6 +144,7 @@ def create_product(product: ProductCreate):
     try:
         with get_connection() as connection:
             with connection.cursor() as cursor:
+
                 cursor.execute(
                     """
                     INSERT INTO products
@@ -146,18 +159,32 @@ def create_product(product: ProductCreate):
                         %s,
                         %s
                     )
-                    RETURNING
-                        productid,
-                        productname,
-                        notes,
-                        isactive,
-                        unitid;
+                    RETURNING productid;
                     """,
                     (
                         product_name,
                         product.notes,
                         product.unit_id,
                     ),
+                )
+
+                product_id = cursor.fetchone()[0]
+
+                cursor.execute(
+                    """
+                    SELECT
+                        p.productid,
+                        p.productname,
+                        p.notes,
+                        p.isactive,
+                        p.unitid,
+                        u.unitname
+                    FROM products p
+                    INNER JOIN units u
+                        ON p.unitid = u.unitid
+                    WHERE p.productid = %s;
+                    """,
+                    (product_id,),
                 )
 
                 created_product = cursor.fetchone()
@@ -168,6 +195,12 @@ def create_product(product: ProductCreate):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A product with this name already exists",
+        )
+
+    except ForeignKeyViolation:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Unit ID.",
         )
 
 
@@ -188,6 +221,7 @@ def update_product(product_id: int, product: ProductUpdate):
     try:
         with get_connection() as connection:
             with connection.cursor() as cursor:
+
                 cursor.execute(
                     """
                     UPDATE products
@@ -195,15 +229,9 @@ def update_product(product_id: int, product: ProductUpdate):
                         productname = %s,
                         notes = %s,
                         unitid = %s,
-                        isactive = %s,
-                        updateddate = CURRENT_TIMESTAMP
+                        isactive = %s
                     WHERE productid = %s
-                    RETURNING
-                        productid,
-                        productname,
-                        notes,
-                        isactive,
-                        unitid;
+                    RETURNING productid;
                     """,
                     (
                         product_name,
@@ -214,13 +242,32 @@ def update_product(product_id: int, product: ProductUpdate):
                     ),
                 )
 
-                updated_product = cursor.fetchone()
+                updated = cursor.fetchone()
 
-        if updated_product is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Product not found",
-            )
+                if updated is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Product not found",
+                    )
+
+                cursor.execute(
+                    """
+                    SELECT
+                        p.productid,
+                        p.productname,
+                        p.notes,
+                        p.isactive,
+                        p.unitid,
+                        u.unitname
+                    FROM products p
+                    INNER JOIN units u
+                        ON p.unitid = u.unitid
+                    WHERE p.productid = %s;
+                    """,
+                    (product_id,),
+                )
+
+                updated_product = cursor.fetchone()
 
         return product_to_dict(updated_product)
 
@@ -228,6 +275,12 @@ def update_product(product_id: int, product: ProductUpdate):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A product with this name already exists",
+        )
+
+    except ForeignKeyViolation:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Unit ID.",
         )
 
 
@@ -265,6 +318,5 @@ def delete_product(product_id: int):
     except RestrictViolation:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This product cannot be deleted because it is currently used by inventory or other records.",
+            detail="This product cannot be deleted because it is referenced by other records.",
         )
-   
